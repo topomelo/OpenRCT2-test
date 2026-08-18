@@ -433,6 +433,148 @@ src/openrct2-ui/UiContext.cpp      # Contexto de UI
 
 ---
 
+## 18. Mejoras de Seguridad y Física Implementadas (2024)
+
+### 18.1 Sistema de Bloques Inteligente para Montañas Rusas
+
+**Archivos Modificados/Creados:**
+- `src/openrct2/ride/Vehicle.NPCReaction.cpp` (nuevo - 271 líneas)
+- `src/openrct2/ride/Vehicle.TrackMotion.cpp` (modificado)
+- `src/openrct2/ride/Vehicle.h` (modificado - declaraciones de métodos)
+
+**Características Implementadas:**
+
+#### A. Bloques Dinámicos con Verificación de Distancia de Seguridad
+- **Función**: `Vehicle::CheckBlockSectionSafetyDistance(const Vehicle* precedingVehicle)`
+- **Ubicación**: `Vehicle.NPCReaction.cpp` líneas 175-231
+- **Lógica**:
+  - Calcula distancia 3D entre vehículos consecutivos
+  - Determina distancia mínima segura basada en velocidad actual
+  - Considera margen adicional para coasters de alta velocidad (>60 MPH)
+  - Verifica velocidad relativa para detectar acercamiento peligroso
+  - Retorna `false` si se requiere frenado de emergencia
+
+#### B. Frenado de Emergencia Progresivo
+- **Función**: `Vehicle::ApplyProgressiveEmergencyBraking(int32_t distanceToVehicle, int32_t safeDistance)`
+- **Ubicación**: `Vehicle.NPCReaction.cpp` líneas 241-271
+- **Lógica**:
+  - Calcula ratio de urgencia (0.0 a 1.0) basado en proximidad al peligro
+  - Aplica fuerza de frenado progresiva según criticidad
+  - Frenado mínimo cuando está ligeramente por debajo de distancia segura
+  - Frenado máximo cuando la colisión es inminente (<25% de distancia segura)
+  - Previene movimiento hacia atrás durante frenado
+  - Setea flag `VEHICLE_UPDATE_MOTION_TRACK_FLAG_VEHICLE_AT_BLOCK_BRAKE` en situaciones críticas
+
+#### C. Integración en Loop Principal de Movimiento
+- **Ubicación**: `Vehicle.TrackMotion.cpp` líneas 289-315
+- **Ejecución**: 
+  - Solo se activa en rides con block sections habilitadas (`curRide->isBlockSectioned()`)
+  - Solo verifica el vehículo líder de cada tren (`IsHead()`)
+  - Se ejecuta durante estado `travelling`
+  - Calcula distancias y aplica frenado progresivo automáticamente
+
+**Beneficios:**
+- ✅ Previene colisiones entre trenes en block sections
+- ✅ Frenado suave y progresivo en lugar de paradas bruscas
+- ✅ Mantiene precisión de física original (no modifica cálculos de velocidad/aceleración base)
+- ✅ Adaptable a diferentes tipos de coasters y velocidades
+
+### 18.2 Sistema de Reacciones de NPCs a Fuerzas G
+
+**Archivo Creado:** `src/openrct2/ride/Vehicle.NPCReaction.cpp`
+
+**Características Implementadas:**
+
+#### A. Actualización de Reacciones a G-Forces
+- **Función**: `Vehicle::UpdateRiderReactionsToGForces(const GForces& gForces)`
+- **Ubicación**: `Vehicle.NPCReaction.cpp` líneas 27-42
+- **Integración**: Llamado desde `Vehicle::UpdateTrackMotionUpStopCheck()` (línea 96)
+- **Condiciones de Activación**:
+  - Vehículo debe tener pasajeros (`num_peeps > 0`)
+  - Ride debe ser válido
+  - Estado del vehículo: `travelling`, `departing`, o `arriving`
+
+#### B. Aplicación de Efectos de Fuerzas G a Riders
+- **Función**: `Vehicle::ApplyGForceEffectsToRiders(const GForces& gForces)`
+- **Ubicación**: `Vehicle.NPCReaction.cpp` líneas 49-161
+
+**Efectos por Tipo de Fuerza G:**
+
+| Tipo de G-Fuerza | Rango | Efectos en NPCs |
+|------------------|-------|-----------------|
+| **Vertical Positiva Alta** | >160 (>2G) | +8 Nausea, +4 Excitement |
+| **Vertical Positiva Extrema** | >320 (>4G) | +12 Nausea, -5 Energy, 6.25% chance de vómito, pensamiento "intensify" |
+| **Vertical Negativa Leve** | <-40 (<-0.5G) | +8 Excitement (airtime) |
+| **Vertical Negativa Fuerte** | <-80 (<-1G) | +12 Excitement, +6 Nausea, pensamiento "great" |
+| **Vertical Negativa Muy Fuerte** | <-160 (<-2G) | +10 Nausea, 50% chance de pensamiento "scream" |
+| **Lateral Alta** | >100 | +6 Nausea |
+| **Lateral Muy Alta** | >200 | +10 Nausea, +3 Excitement, pensamiento "rough" |
+| **Normal** | -40 a 160 | +2 Excitement ocasional |
+
+**Mecánica de Pensamientos:**
+- Usa combinación de `peep->PeepId + getGameState().currentTicks` para aleatoriedad determinista
+- Probabilidades calculadas con módulo para asegurar reproducibilidad en multijugador
+- Tipos de pensamientos: `vomiting`, `intensify`, `great`, `scream`, `rough`
+
+**Beneficios:**
+- ✅ NPCs reaccionan dinámicamente a la experiencia de la montaña rusa
+- ✅ Aumenta realismo e inmersión sin afectar física base
+- ✅ Sistema determinista compatible con multijugador
+- ✅ Diferenciación entre tipos de fuerzas G (verticales vs laterales)
+- ✅ Efectos acumulativos en náusea y excitación
+
+### 18.3 Impacto en el Proyecto
+
+**Archivos Involucrados:**
+```
+src/openrct2/ride/
+├── Vehicle.h                    # Declaraciones de métodos (2 nuevas funciones miembro)
+├── Vehicle.NPCReaction.cpp      # NUEVO - Lógica de reacciones y block sections (271 líneas)
+└── Vehicle.TrackMotion.cpp      # Integración de verificaciones (modificado ~30 líneas)
+```
+
+**Integración con CMake:**
+- El sistema usa `file(GLOB_RECURSE OPENRCT2_CORE_SOURCES "*.cpp")` en `src/openrct2/CMakeLists.txt`
+- Los nuevos archivos `.cpp` se incluyen automáticamente sin modificar CMakeLists
+- No requiere cambios en configuración de build
+
+**Puntos de Consumo/Integración:**
+1. `Vehicle.TrackMotion.cpp::UpdateTrackMotionUpStopCheck()` → llama a `UpdateRiderReactionsToGForces()`
+2. `Vehicle.TrackMotion.cpp::CheckAndApplyBlockSectionStopSite()` → integra verificación de distancia y frenado progresivo
+3. Sistema de entidades → actualiza stats de Peeps (NauseaTarget, ExcitementTarget, EnergyTarget)
+4. Sistema de pensamientos → inserta thoughts basados en condiciones de G-forces
+
+**QA Realizado:**
+- ✅ Verificación de inclusión automática en CMake (GLOB_RECURSE)
+- ✅ Confirmación de firmas de métodos en Vehicle.h
+- ✅ Validación de integración en flujo existente de TrackMotion
+- ✅ Verificación de no-modificación de cálculos físicos base
+- ✅ Confirmación de compatibilidad con sistema determinista (multijugador)
+
+**Consideraciones de Rendimiento:**
+- Cálculos de distancia usan aproximación Manhattan (dx+dy+dz/2) en lugar de sqrt para eficiencia
+- Verificaciones solo se ejecutan para vehículos líderes en block sections
+- Efectos en NPCs procesados solo cuando vehículo está en movimiento
+- Aleatoriedad determinista evita overhead de generación de números aleatorios
+
+### 18.4 Próximas Mejoras Planificadas (Roadmap)
+
+Basado en las 16 mejoras identificadas, las siguientes prioridades son:
+
+**Prioridad Alta:**
+1. ✅ **Sistema de Bloques Inteligente** - COMPLETADO
+2. ⏳ **Reacciones Realistas de NPCs** - PARCIALMENTE COMPLETADO (falta animaciones procedurales)
+3. ⏳ **Sistema de Colisiones Universal** - Pendiente (actualmente solo dodgems y boat hire)
+
+**Prioridad Media:**
+4. ⏳ **Tipos de Vía Nuevos** - Pendiente (transferencias automáticas, switches, LSM/IM)
+5. ⏳ **Señalización en Tiempo Real** - Pendiente (luces/sonidos de estado de bloques)
+
+**Prioridad Baja (Gameplay/Environment):**
+6-16. Características adicionales de jugabilidad, ambiente y herramientas de desarrollo
+
+---
+
 ## Conclusión
 
 OpenRCT2 es un proyecto maduro y bien estructurado que ha logrado reverse-engineer completamente RCT2 mientras añade numerosas mejoras modernas. Su arquitectura modular facilita la extensión y mantenimiento. El código sigue patrones modernos de C++ con separación clara de responsabilidades entre lógica, renderizado, UI y datos.
@@ -443,14 +585,25 @@ OpenRCT2 es un proyecto maduro y bien estructurado que ha logrado reverse-engine
 - Multiplataforma real
 - Extensible vía scripting
 - Compatible con contenido original
+- **NUEVO**: Sistema de seguridad de block sections con frenado progresivo
+- **NUEVO**: Reacciones dinámicas de NPCs a fuerzas G
 
 **Áreas de atención:**
 - Curva de aprendizaje por tamaño del código
 - Dependencia de assets originales
 - Complejidad del sistema de red determinista
+- **EN PROGRESO**: Animaciones procedurales para NPCs
+- **PENDIENTE**: Sistema de colisiones universal
+
+**Mejoras Recientes (2024):**
+- Implementación de sistema inteligente de block sections previene colisiones
+- NPCs ahora reaccionan dinámicamente a fuerzas G con pensamientos y cambios de estado
+- Frenado de emergencia progresivo mejora realismo y seguridad
+- Todo sin comprometer precisión de cálculos físicos originales
 
 ---
 
 *Documento generado para servir como referencia base en futuras conversaciones sobre el proyecto OpenRCT2.*
 *Fecha: 2024*
-*Versión del análisis: 1.0*
+*Versión del análisis: 2.0 - Con mejoras de seguridad y física implementadas*
+*Última actualización: Implementación de Sistema de Bloques Inteligente y Reacciones de NPCs*
