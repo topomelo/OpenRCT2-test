@@ -415,6 +415,14 @@ namespace OpenRCT2
         [[nodiscard]] UpdateMiniGolfSubroutineStatus Loc6DCA9A(const Ride& curRide);
         void UpdateTrackMotionPreUpdate(
             Vehicle& car, const Ride& curRide, const RideObjectEntry& rideEntry, const CarEntry* carEntry);
+
+        // NPC G-Force Reaction System
+        void UpdateRiderReactionsToGForces(const GForces& gForces);
+        void ApplyGForceEffectsToRiders(const GForces& gForces);
+        
+        // Enhanced Block Section Safety
+        bool CheckBlockSectionSafetyDistance(const Vehicle* precedingVehicle) const;
+        void ApplyProgressiveEmergencyBraking(int32_t distanceToVehicle, int32_t safeDistance);
     };
     static_assert(sizeof(Vehicle) <= 512);
 

@@ -91,6 +91,9 @@ namespace OpenRCT2
                     _vehicleMotionTrackFlags |= VEHICLE_UPDATE_MOTION_TRACK_FLAG_VEHICLE_DERAILED;
                 }
             }
+            
+            // Update rider reactions to G-forces for coasters
+            UpdateRiderReactionsToGForces(gForces);
         }
         else if (carEntry->flags.has(CarEntryFlag::hasNoUpstopWheelsBobsleigh))
         {
@@ -118,6 +121,9 @@ namespace OpenRCT2
                 {
                     _vehicleMotionTrackFlags |= VEHICLE_UPDATE_MOTION_TRACK_FLAG_VEHICLE_DERAILED;
                 }
+                
+                // Update rider reactions to G-forces for bobsleigh
+                UpdateRiderReactionsToGForces(gForces);
             }
         }
     }
@@ -276,6 +282,36 @@ namespace OpenRCT2
                 break;
             default:
                 break;
+        }
+        
+        // Enhanced Block Section Safety: Check distance to preceding vehicle
+        // and apply progressive emergency braking if too close
+        if (curRide->isBlockSectioned() && IsHead() && status == Status::travelling)
+        {
+            Vehicle* prevVehicle = getGameState().entities.GetEntity<Vehicle>(prev_vehicle_on_ride);
+            if (prevVehicle != nullptr && prevVehicle != this)
+            {
+                // Check if we're maintaining safe distance
+                if (!CheckBlockSectionSafetyDistance(prevVehicle))
+                {
+                    // Calculate current distance and safe distance
+                    int32_t dx = std::abs(x - prevVehicle->x);
+                    int32_t dy = std::abs(y - prevVehicle->y);
+                    int32_t dz = std::abs(z - prevVehicle->z);
+                    int32_t distance = dx + dy + (dz / 2);
+                    
+                    int32_t currentSpeed = std::abs(velocity);
+                    int32_t safeDistance = 32 + (currentSpeed >> 12);
+                    
+                    if (curRide->maxSpeed > 60_MPH)
+                    {
+                        safeDistance = (safeDistance * 3) / 2;
+                    }
+                    
+                    // Apply progressive emergency braking
+                    ApplyProgressiveEmergencyBraking(distance, safeDistance);
+                }
+            }
         }
     }
 
